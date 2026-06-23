@@ -94,6 +94,49 @@ def _get_tensor_numpy_raw(folder: str, key: str) -> np.ndarray:
                     return t.numpy()
     raise KeyError(f"Tensor '{key}' not found in {folder}")
 
+def _load_base_dir_numpy(folder: str, keys: list[str]) -> tuple[Dict[str, np.ndarray], str]:
+    """
+    Load requested keys from a safetensors folder, one file open per shard.
+    Returns (float32 arrays for math, sha256 hex of raw bytes for verify).
+    """
+    try:
+        import torch
+        from safetensors import safe_open
+    except ImportError:
+        raise ImportError("pip install safetensors torch to use save_delta_from_paths")
+
+    from collections import defaultdict
+
+    key_to_shard = {}
+    for fname in sorted(os.listdir(folder)):
+        if fname.endswith(".safetensors"):
+            with safe_open(f"{folder}/{fname}", framework="pt", device="cpu") as f:
+                for k in f.keys():
+                    key_to_shard[k] = fname
+
+    shard_to_keys = defaultdict(list)
+    for k in keys:
+        if k not in key_to_shard:
+            raise KeyError(f"Tensor '{k}' not found in {folder}")
+        shard_to_keys[key_to_shard[k]].append(k)
+
+    out = {}
+    hasher = hashlib.sha256()
+    for fname, shard_keys in shard_to_keys.items():
+        with safe_open(f"{folder}/{fname}", framework="pt", device="cpu") as f:
+            for k in sorted(shard_keys):  # sorted for determinism
+                t = f.get_tensor(k)
+                # raw bytes for hash (matches save side)
+                raw = t.view(torch.int16).numpy() if t.dtype == torch.bfloat16 else t.numpy()
+                hasher.update(k.encode("utf-8"))
+                hasher.update(raw.tobytes())
+                # float32 for math
+                if t.dtype == torch.bfloat16:
+                    t = t.to(torch.float32)
+                out[k] = t.numpy().astype(np.float32)
+
+    return out, hasher.hexdigest()
+
 
 def _hwrite(f, hasher, data: bytes) -> None:
     """Write data to file and update checksum simultaneously."""
@@ -371,6 +414,51 @@ def load_delta(
     print(f"[deltatensors] loaded {Path(path).name}  ({len(reconstructed)} tensors, strategy={strategy})")
     return reconstructed
 
+def load_delta_from_paths(
+    path: Union[str, Path],
+    base_dir: Union[str, Path],
+    verify: bool = True,
+) -> Dict[str, np.ndarray]:
+    """
+    Reconstruct a fine-tuned model from a .wdelta file and a base model directory.
+    Loads each base shard once rather than once per tensor.
+
+    Args:
+        path:     Path to the .wdelta file.
+        base_dir: Folder containing base model safetensors shards.
+        verify:   SHA-256 verify the base before reconstructing (recommended).
+
+    Returns:
+        Reconstructed state dict as Dict[str, np.ndarray].
+    """
+    base_dir = str(base_dir)
+
+    with open(path, "rb") as f:
+        parent_hash, strategy, compressed_tensors = read_wdelta(f)
+
+    all_keys = list(compressed_tensors.keys())
+    base_arrays = _load_base_dir_numpy(base_dir, all_keys)
+
+    base_arrays, actual_hash = _load_base_dir_numpy(base_dir, all_keys)
+
+    if verify:
+        if actual_hash != parent_hash:
+            raise ValueError(
+                f"Base model hash mismatch.\n"
+                f"  Expected : {parent_hash}\n"
+                f"  Got      : {actual_hash}\n"
+                f"Make sure you're loading the exact base model this delta was computed against."
+            )
+
+    reconstructed = {}
+    for name, payload in compressed_tensors.items():
+        base_arr = base_arrays.pop(name)  # pop to free as we go
+        delta = decompress(payload)
+        reconstructed[name] = (base_arr + delta).astype(payload["dtype"])
+        del base_arr, delta
+
+    print(f"[deltatensors] loaded {Path(path).name}  ({len(reconstructed)} tensors, strategy={strategy})")
+    return reconstructed
 
 def inspect(path: Union[str, Path]) -> dict:
     """
