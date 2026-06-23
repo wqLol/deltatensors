@@ -1,0 +1,23 @@
+site_name: deltatensors
+site_description: Near-lossless delta compression for fine-tuned neural network models
+site_url: https://deltatensors.readthedocs.io
+repo_url: https://github.com/aaravgaur/deltatensors
+repo_name: aaravgaur/deltatensors
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: indigo
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference: api.md
+  - Format Spec: format.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
