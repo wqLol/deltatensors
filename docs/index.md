@@ -4,7 +4,7 @@
 
 `deltatensors` is a lightweight tool for post-training delta compression of fine-tuned neural network models
 
-Train however you want: full fine-tune, FSDP, whatever, `deltatensors` doesn't care. Diff your fine-tuned model against the base, keep the diff, throw away the redundant weights. `.wdelta` files are a fraction of the size and reconstruct with under 1% perplexity difference from the original.
+Train however you want: full fine-tune, FSDP, whatever. `deltatensors` diffs your fine-tuned model against the base and keeps the diff while throwing away the redundant weights. `.wdelta` files are a fraction of the size and reconstruct with under 1% perplexity difference from the original (comparable to LoRA, except its post-training).
 
 **Tested on Qwen2.5-0.5B fine-tuned on WikiText-2:**
 - Perplexity: 19.11 (original) → 19.22 (reconstructed) — 0.58% difference, not noticeable in practice

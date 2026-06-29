@@ -4,10 +4,10 @@
 
 `deltatensors` is a lightweight tool for post-training delta compression of fine-tuned neural network models
 
-Train however you want: full fine-tune, FSDP, whatever, `deltatensors` doesn't care. Diff your fine-tuned model against the base, keep the diff, throw away the redundant weights. `.wdelta` files are a fraction of the size and reconstruct with under 1% perplexity difference from the original.
+Train however you want: full fine-tune, FSDP, whatever. `deltatensors` diffs your fine-tuned model against the base and keeps the diff while throwing away the redundant weights. `.wdelta` files are a fraction of the size and reconstruct with under 1% perplexity difference from the original (comparable to LoRA, except its post-training).
 
 **Tested on Qwen2.5-0.5B fine-tuned on WikiText-2:**
-- Perplexity: 19.11 (original) → 19.22 (reconstructed) — 0.58% difference, not noticeable in practice
+- Perplexity: 19.11 (original) → 19.22 (reconstructed) -- 0.58% difference, not noticeable in practice
 - Beats running int4 quantization on the full fine-tuned model
 - 294 MB delta vs 953 MB fine-tuned model (3.2x smaller)
 - ~2.8x total storage reduction across 10 fine-tunes
@@ -55,7 +55,7 @@ info = dt.inspect("checkpoint.wdelta")
 | `sparse` | tunable via `sparsity=` | good |
 | `quantized` | BitDelta-style 1-bit | aggressive |
 
-`int4` uses outlier extraction (top k% weights stored as float16) + 4-bit quantization for the remainder — the strategy used in the benchmark above. The outlier fraction is configurable via `outlier_fraction=` (default 0.01).
+`int4` uses outlier extraction (top k% weights stored as float16) + 4-bit quantization for the remainder -- the strategy used in the benchmark above. The outlier fraction is configurable via `outlier_fraction=` (default 0.01).
 
 **Tip:** just stick to `int4`. `sparse` and `quantized` are there if you want to tune the tradeoff yourself or need a baseline to compare against, but `int4` wins on both quality and size in every test we've run.
 
@@ -83,9 +83,9 @@ trainer = Trainer(
 trainer.train()
 ```
 
-Each checkpoint gets a `model.wdelta` alongside the usual safetensors files. GPU compression is forced off during training — your GPU is busy with optimizer states, not free for this.
+Each checkpoint gets a `model.wdelta` alongside the usual safetensors files. GPU compression is forced off during training -- your GPU is busy with optimizer states, not free for this.
 
-**Tip:** leave `delete_full_checkpoint=False` until you're sure you won't need to resume from that checkpoint. Once the safetensors are gone, so is `load_best_model_at_end` and training resumption — you're stuck reconstructing through `deltatensors` for everything downstream.
+**Tip:** leave `delete_full_checkpoint=False` until you're sure you won't need to resume from that checkpoint. Once the safetensors are gone, so is `load_best_model_at_end` and training resumption -- you're stuck reconstructing through `deltatensors` for everything downstream.
 
 Reconstruct any checkpoint afterwards:
 
@@ -95,7 +95,7 @@ sd = dt.load_delta_from_paths("outputs/checkpoint-500/model.wdelta", "path/to/ba
 
 ## Lineage chains
 
-Track and reconstruct a full fine-tuning history with chains of `.wdelta` files. Each delta is computed against the *prior* reconstructed model, not the original base — so incremental updates stay small.
+Track and reconstruct a full fine-tuning history with chains of `.wdelta` files. Each delta is computed against the *prior* reconstructed model, not the original base -- so incremental updates stay small.
 
 ```
 base ──► v1.wdelta ──► v1_model ──► v2.wdelta ──► v2_model ──► ...
@@ -116,15 +116,15 @@ history = dt.inspect_chain(["v1.wdelta", "v2.wdelta", "v3.wdelta"])
 for entry in history:
     print(entry["step"], entry["size_mb"], "MB", entry["parent_hash"][:8])
 
-# Reconstruct the model at the end of the chain — verifies each hash link
+# Reconstruct the model at the end of the chain -- verifies each hash link
 sd = dt.load_delta_chain(["v1.wdelta", "v2.wdelta"], base="base_model/")
 ```
 
-Each `.wdelta` records a `parent_hash` (SHA-256 of the model it was computed against). `load_delta_chain` verifies every link automatically — apply deltas in the wrong order and it raises `ValueError` instead of silently handing you a corrupted model.
+Each `.wdelta` records a `parent_hash` (SHA-256 of the model it was computed against). `load_delta_chain` verifies every link automatically -- apply deltas in the wrong order and it raises `ValueError` instead of silently handing you a corrupted model.
 
 `save_delta_chain_from_paths` is fully streaming: peak RAM is O(one tensor pair), not O(two full models).
 
-**Tip:** don't delete intermediate `.wdelta` files in a chain — reconstructing v5 means replaying v1 through v5 in order. If you need v5 to stand alone, save it as a flat delta against base instead.
+**Tip:** don't delete intermediate `.wdelta` files in a chain -- reconstructing v5 means replaying v1 through v5 in order. If you need v5 to stand alone, save it as a flat delta against base instead.
 
 ## Why not LoRA?
 
